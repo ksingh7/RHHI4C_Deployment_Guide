@@ -1,0 +1,191 @@
+heat_template_version: 2016-10-14
+
+description: This template will create an external network, private network and a router
+
+parameters:
+  provider_net_name:
+    type: string
+    description: Name of the tenant network.
+    default: 'external_network1'
+  provider_subnet_name:
+    type: string
+    description: Name of the tenant subnet.
+    default: 'external_network_subnet1'
+  provider_net_cidr:
+    type: string
+    description: CIDR for the provider(external) network
+    default: 172.21.0.0/20
+  provider_net_gateway:
+    type: string
+    description: GW for the external network
+    default: 172.21.15.254
+  provider_net_pool_start:
+    type: string
+    description: start of the IP pool for the external network
+    default: 172.21.1.175
+  provider_net_pool_end:
+    type: string
+    description: end of the IP pool for the external network
+    default: 172.21.1.200
+ 
+  tenant_net_name:
+    type: string
+    description: Name of the tenant network.
+    default: 'private_network1'
+  tenant_subnet_name:
+    type: string
+    description: Name of the tenant subnet.
+    default: 'private_network_subnet1'
+  tenant_router_name:
+    type: string
+    description: Name of the tenant router.
+    default: 'private_network_router1'
+  tenant_net_cidr:
+    type: string
+    description: CIDR for the tenant network
+    default: 192.168.1.0/24
+  tenant_net_gateway:
+    type: string
+    description: gateway for the tenant network
+    default: 192.168.1.254
+  tenant_net_pool_start:
+    type: string
+    description: network pool start. typically .11 of whatever /24 is defined
+    default: 192.168.1.10
+  tenant_net_pool_end:
+    type: string
+    description: network pool end. typically .200 of whatever /24 is defined
+    default: 192.168.1.100
+
+  tenant_key_name:
+    type: string
+    description: ssh key required for server creation
+    default: 'admin-ssh-keypair'
+  tenant_server1_name:
+    type: string
+    description: name of the instance
+    default: 'instance1'
+  tenant_security_group:
+    type: string
+    description: name of the security group
+    default: 'tenant_sg1'  
+
+resources:
+
+  instance_flavor:
+    type: OS::Nova::Flavor
+    properties:
+      is_public: true
+      name: m1.tiny
+      ram: 1024
+      vcpus: 1
+      disk: 10
+
+  provider_network:
+    type: OS::Neutron::ProviderNet
+    properties:
+      name: { get_param: provider_net_name }
+      network_type: flat
+      physical_network: floating
+      router_external: True
+
+  provider_subnet:
+    type: OS::Neutron::Subnet
+    properties:
+      name: { get_param: provider_subnet_name }
+      network_id: { get_resource: provider_network }
+      cidr: { get_param: provider_net_cidr }
+      enable_dhcp: False
+      gateway_ip: { get_param: provider_net_gateway }
+      dns_nameservers: [ "8.8.8.8" ]
+      allocation_pools:
+        - start: { get_param: provider_net_pool_start }
+          end: { get_param: provider_net_pool_end }
+
+  tenant_net:
+    type: OS::Neutron::Net
+    properties:
+      name: { get_param: tenant_net_name }
+
+  tenant_subnet:
+    type: OS::Neutron::Subnet
+    properties:
+      name: { get_param: tenant_subnet_name }
+      network_id: { get_resource: tenant_net }
+      cidr: { get_param: tenant_net_cidr }
+      gateway_ip: { get_param: tenant_net_gateway }
+      allocation_pools:
+        - start: { get_param: tenant_net_pool_start }
+          end: { get_param: tenant_net_pool_end }
+
+  tenant_router:
+    type: OS::Neutron::Router
+    properties:
+      name: { get_param: tenant_router_name }
+      external_gateway_info:
+        network: { get_resource: provider_network }
+
+  router_interface:
+    type: OS::Neutron::RouterInterface
+    properties:
+      router_id: { get_resource: tenant_router }
+      subnet_id: { get_resource: tenant_subnet }
+
+  security_group:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name: { get_param: tenant_security_group }
+      description: Ping, SSH and all TCP
+      rules:
+       - protocol: icmp
+       - protocol: tcp
+         port_range_min: 22
+         port_range_max: 22
+       - protocol: tcp
+         port_range_min: 1
+         port_range_max: 65535
+
+#  tenant_key:
+#    type: OS::Nova::KeyPair
+#    properties:
+#      name: { get_param: tenant_key_name }
+#      save_private_key: False
+
+  server1:
+    type: OS::Nova::Server
+    properties:
+      name: { get_param: tenant_server1_name }
+      image: cirros-0.4.0-x86_64
+      flavor: { get_resource: instance_flavor }
+      key_name:  { get_param: tenant_key_name }
+      networks:
+        - port: { get_resource: server1_port }
+
+  server1_port:
+    type: OS::Neutron::Port
+    properties:
+      network: { get_resource: tenant_net }
+      fixed_ips:
+        - subnet: { get_resource: tenant_subnet }
+      security_groups: 
+        - { get_resource: security_group }
+
+  server1_floating_ip:
+    type: OS::Neutron::FloatingIP
+    properties:
+      floating_network: { get_resource: provider_network }
+      port_id: { get_resource: server1_port }
+
+  server1_volume:
+    type: OS::Cinder::Volume
+    properties:
+      name: "test_volume"
+      description: "Test Volume"
+      size: 10
+
+  server1_volume_attach:
+    type: OS::Cinder::VolumeAttachment
+    properties:
+      volume_id: { get_resource: server1_volume }
+      instance_uuid: { get_resource: server1 }      
+

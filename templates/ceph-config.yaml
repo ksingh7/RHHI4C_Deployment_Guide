@@ -1,0 +1,67 @@
+resource_registry:
+  # Just in case we want to redeploy - BE careful in production.
+  OS::TripleO::NodeUserData: /home/stack/templates/wipe-disks.yaml
+
+parameter_defaults:
+  CephAnsibleDisksConfig:
+    osd_scenario: non-collocated
+    devices:
+      - /dev/sdb
+      - /dev/sdc
+      - /dev/sdd
+      - /dev/sde
+      - /dev/sdf
+      - /dev/sdg
+      - /dev/sdh
+      - /dev/sdi
+      - /dev/sdj
+      - /dev/sdk
+      - /dev/sdl
+      - /dev/sdm                              
+    dedicated_devices:
+      - /dev/nvme0n1
+      - /dev/nvme0n1
+      - /dev/nvme0n1
+      - /dev/nvme0n1
+      - /dev/nvme0n1
+      - /dev/nvme0n1
+      - /dev/nvme0n1
+      - /dev/nvme0n1
+      - /dev/nvme0n1
+      - /dev/nvme0n1
+      - /dev/nvme0n1
+      - /dev/nvme0n1
+    journal_size: 10240
+  CephPoolDefaultPgNum: 32
+  CephAnsiblePlaybookVerbosity: 0
+  CephAnsibleExtraConfig:
+    osd_objectstore: filestore
+    # HCI tuning
+    osd_recovery_op_priority: 3
+    osd_recovery_max_active: 3
+    osd_max_backfills: 1
+    # reserve 5G RAM + 1 CPU per OSD
+    ceph_osd_docker_memory_limit: 3g
+    ceph_osd_docker_cpu_limit: 1
+  CephConfigOverrides:
+    mon_osd_full_ratio: 90
+    max_open_files: 131072
+    osd_pool_default_pg_num: 32
+    osd_pool_default_pgp_num: 32
+    osd_journal_size: 10240
+    mon_osd_full_ratio: 90
+    max_open_files: 131072
+    mon_max_pg_per_osd: 1000 
+
+  # Managed automatically by osp13
+  # ControllerExtraConfig:
+  #   tripleo::firewall::firewall_rules:
+  #     '300 allow ceph mgrs':
+  #       port: 6800
+  #       proto: tcp
+  #       action: accept
+
+  #  CephPools:
+  #    - name: vms
+  #      pg_num: 1024
+  #      pgp_num: 1024
