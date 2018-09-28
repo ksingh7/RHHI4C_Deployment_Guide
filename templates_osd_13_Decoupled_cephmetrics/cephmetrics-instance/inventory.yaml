@@ -1,0 +1,60 @@
+all:
+  hosts:
+    cephmetrics:
+      ansible_host: 172.21.1.175
+      ansible_ssh_common_args: -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+      ansible_ssh_private_key_file: /home/stack/stack.pem
+      ansible_ssh_user: cloud-user
+    controller-0:
+      ansible_host: 192.168.120.18
+      ansible_ssh_user: heat-admin
+      cephmetrics_ip: 172.17.5.201
+    ceph-storage-0:
+      ansible_host: 192.168.120.19
+      ansible_ssh_user: heat-admin
+      cephmetrics_ip: 172.17.5.221
+    ceph-storage-1:
+      ansible_host: 192.168.120.10
+      ansible_ssh_user: heat-admin
+      cephmetrics_ip: 172.17.5.222
+    ceph-storage-2:
+      ansible_host: 192.168.120.15
+      ansible_ssh_user: heat-admin
+      cephmetrics_ip: 172.17.5.223
+    ceph-storage-3:
+      ansible_host: 192.168.120.11
+      ansible_ssh_user: heat-admin
+      cephmetrics_ip: 172.17.5.224
+    ceph-storage-4:
+      ansible_host: 192.168.120.17
+      ansible_ssh_user: heat-admin
+      cephmetrics_ip: 172.17.5.225
+  vars:
+    grafana:
+      admin_password: admin
+    prometheus:
+      etc_hosts:
+        cephmetrics: 172.21.1.175
+        controller-0: 172.17.5.201
+        ceph-storage-0: 172.17.5.221
+        ceph-storage-1: 172.17.5.222
+        ceph-storage-2: 172.17.5.223
+        ceph-storage-3: 172.17.5.224
+        ceph-storage-4: 172.17.5.225
+        
+ceph-grafana:
+  hosts:
+    cephmetrics: {}
+mgrs:
+  hosts:
+    controller-0: {}
+mons:
+  hosts:
+    controller-0: {}
+osds:
+  hosts:
+    ceph-storage-0: {}
+    ceph-storage-1: {}
+    ceph-storage-2: {}
+    ceph-storage-3: {}
+    ceph-storage-4: {}
