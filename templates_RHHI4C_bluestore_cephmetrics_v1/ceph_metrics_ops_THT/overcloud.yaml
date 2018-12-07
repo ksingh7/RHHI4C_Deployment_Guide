@@ -1,0 +1,1353 @@
+# primary role is: Controller
+heat_template_version: queens
+
+description: >
+  Deploy an OpenStack environment, consisting of several node types (roles),
+  Controller, Compute, BlockStorage, SwiftStorage and CephStorage. The Storage
+  roles enable independent scaling of the storage components, but the minimal
+  deployment is one Controller and one Compute node.
+
+
+# TODO(shadower): we should probably use the parameter groups to put
+# some order in here.
+parameters:
+
+  # Common parameters (not specific to a role)
+  CloudNameStorage:
+    default: overcloud.storage.localdomain
+    description: >
+      The DNS name of this cloud's storage endpoint. E.g.
+      'ci-overcloud.storage.tripleo.org'.
+    type: string
+  # Special case StorageMgmt hostname param, which is CloudNameStorageManagement
+  CloudNameStorageManagement:
+    default: overcloud.storagemgmt.localdomain
+    description: >
+      The DNS name of this cloud's storage_mgmt endpoint. E.g.
+      'ci-overcloud.storagemgmt.tripleo.org'.
+    type: string
+  # Special case the Internal API hostname param, which is CloudNameInternal
+  CloudNameInternal:
+    default: overcloud.internalapi.localdomain
+    description: >
+      The DNS name of this cloud's internal_api endpoint. E.g.
+      'ci-overcloud.internalapi.tripleo.org'.
+    type: string
+  # Special case the External hostname param, which is CloudName
+  CloudName:
+    default: overcloud.localdomain
+    description: The DNS name of this cloud. E.g. ci-overcloud.tripleo.org
+    type: string
+  CloudNameCephMetrics:
+    default: overcloud.cephmetrics.localdomain
+    description: >
+      The DNS name of this cloud's cephmetrics endpoint. E.g.
+      'ci-overcloud.cephmetrics.tripleo.org'.
+    type: string
+  CloudNameCtlplane:
+    default: overcloud.ctlplane.localdomain
+    description: >
+      The DNS name of this cloud's provisioning network endpoint. E.g.
+      'ci-overcloud.ctlplane.tripleo.org'.
+    type: string
+  ExtraHostFileEntries:
+    default: []
+    description: List of extra hosts entries to be appended to /etc/hosts
+    type: comma_delimited_list
+  EndpointMapOverride:
+    default: {}
+    description: Can be used to override the calcluated EndpointMap
+    type: json
+  ExtraConfig:
+    default: {}
+    description: |
+      Additional hiera configuration to inject into the cluster.
+    type: json
+  ControllerExtraConfig:
+    default: {}
+    description: |
+      Role specific additional hiera configuration to inject into the cluster.
+    type: json
+  controllerExtraConfig:
+    default: {}
+    description: |
+      DEPRECATED use ControllerExtraConfig instead
+    type: json
+  ComputeHCIExtraConfig:
+    default: {}
+    description: |
+      Role specific additional hiera configuration to inject into the cluster.
+    type: json
+  NeutronControlPlaneID:
+    default: 'ctlplane'
+    type: string
+    description: Neutron ID or name for ctlplane network.
+  NeutronPublicInterface:
+    default: nic1
+    description: Which interface to add to the NeutronPhysicalBridge.
+    type: string
+  ControlPlaneSubnet:
+    description: The name of the undercloud Neutron control plane subnet
+    default: ctlplane-subnet
+    type: string
+  ControlFixedIPs:
+    default: []
+    description: >
+        Control the IP allocation for the ControlVirtualIP port. E.g.
+        [{'ip_address':'1.2.3.4'}]
+    type: json
+  StorageVirtualFixedIPs:
+    default: []
+    description: >
+        Control the IP allocation for the StorageVirtualInterface port. E.g.
+        [{'ip_address':'1.2.3.4'}]
+    type: json
+  StorageMgmtVirtualFixedIPs:
+    default: []
+    description: >
+        Control the IP allocation for the StorageMgmtVirtualInterface port. E.g.
+        [{'ip_address':'1.2.3.4'}]
+    type: json
+  InternalApiVirtualFixedIPs:
+    default: []
+    description: >
+        Control the IP allocation for the InternalApiVirtualInterface port. E.g.
+        [{'ip_address':'1.2.3.4'}]
+    type: json
+  # TODO (dsneddon) Legacy name, eventually refactor to match network name
+  PublicVirtualFixedIPs:
+    default: []
+    description: >
+        Control the IP allocation for the PublicVirtualInterface port. E.g.
+        [{'ip_address':'1.2.3.4'}]
+    type: json
+  CephMetricsVirtualFixedIPs:
+    default: []
+    description: >
+        Control the IP allocation for the CephMetricsVirtualInterface port. E.g.
+        [{'ip_address':'1.2.3.4'}]
+    type: json
+  RabbitCookieSalt:
+    type: string
+    default: unset
+    description: Salt for the rabbit cookie, change this to force the randomly generated rabbit cookie to change.
+  RedisVirtualFixedIPs:
+    default: []
+    description: >
+        Control the IP allocation for the virtual IP used by Redis. E.g.
+        [{'ip_address':'1.2.3.4'}]
+    type: json
+  CloudDomain:
+    default: 'localdomain'
+    type: string
+    description: >
+      The DNS domain used for the hosts. This must match the
+      overcloud_domain_name configured on the undercloud.
+  ServerMetadata:
+    default: {}
+    description: >
+      Extra properties or metadata passed to Nova for the created nodes in
+      the overcloud. It's accessible via the Nova metadata API.
+    type: json
+
+# Compute-specific params
+# FIXME(shardy) handle these deprecated names as they don't match compute.yaml
+  HypervisorNeutronPhysicalBridge:
+    default: 'br-ex'
+    description: >
+      An OVS bridge to create on each hypervisor. This defaults to br-ex the
+      same as the control plane nodes, as we have a uniform configuration of
+      the openvswitch agent. Typically should not need to be changed.
+    type: string
+  HypervisorNeutronPublicInterface:
+    default: nic1
+    description: What interface to add to the HypervisorNeutronPhysicalBridge.
+    type: string
+
+  NodeCreateBatchSize:
+    default: 30
+    description: Maxiumum batch size for creating nodes
+    type: number
+
+  # Jinja loop for Role in role_data.yaml
+
+  # Parameters generated for Controller Role
+  ControllerServices:
+    description: A list of service resources (configured in the Heat
+                 resource_registry) which represent nested stacks
+                 for each service that should get installed on the Controller role.
+    type: comma_delimited_list
+
+  ControllerCount:
+    description: Number of Controller nodes to deploy
+    type: number
+    default: 1
+
+  ControllerHostnameFormat:
+    type: string
+    description: >
+      Format for Controller node hostnames
+      Note %index% is translated into the index of the node, e.g 0/1/2 etc
+      and %stackname% is replaced with the stack name e.g overcloud
+  
+    default: "controller-%index%"
+  
+  ControllerRemovalPolicies:
+    default: []
+    type: json
+    description: >
+      List of resources to be removed from Controller ResourceGroup when
+      doing an update which requires removal of specific resources.
+      Example format ComputeRemovalPolicies: [{'resource_list': ['0']}]
+
+  ControllerSchedulerHints:
+    type: json
+    description: Optional scheduler hints to pass to nova
+    default: {}
+
+  ControllerParameters:
+    type: json
+    description: Optional Role Specific parameters to be provided to service
+    default: {}
+
+  # Parameters generated for ComputeHCI Role
+  ComputeHCIServices:
+    description: A list of service resources (configured in the Heat
+                 resource_registry) which represent nested stacks
+                 for each service that should get installed on the ComputeHCI role.
+    type: comma_delimited_list
+
+  ComputeHCICount:
+    description: Number of ComputeHCI nodes to deploy
+    type: number
+    default: 0
+
+  ComputeHCIHostnameFormat:
+    type: string
+    description: >
+      Format for ComputeHCI node hostnames
+      Note %index% is translated into the index of the node, e.g 0/1/2 etc
+      and %stackname% is replaced with the stack name e.g overcloud
+  
+    default: "osd-compute-%index%"
+  
+  ComputeHCIRemovalPolicies:
+    default: []
+    type: json
+    description: >
+      List of resources to be removed from ComputeHCI ResourceGroup when
+      doing an update which requires removal of specific resources.
+      Example format ComputeRemovalPolicies: [{'resource_list': ['0']}]
+
+  ComputeHCISchedulerHints:
+    type: json
+    description: Optional scheduler hints to pass to nova
+    default: {}
+
+  ComputeHCIParameters:
+    type: json
+    description: Optional Role Specific parameters to be provided to service
+    default: {}
+
+
+  # Identifiers to trigger tasks on nodes
+  UpdateIdentifier:
+    default: ''
+    type: string
+    description: >
+      Setting to a previously unused value during stack-update will trigger
+      package update on all nodes
+  DeployIdentifier:
+    default: ''
+    type: string
+    description: >
+      Setting this to a unique value will re-run any deployment tasks which
+      perform configuration on a Heat stack-update.
+  AddVipsToEtcHosts:
+    default: True
+    type: boolean
+    description: >
+      Set to true to append per network Vips to /etc/hosts on each node.
+
+  DeploymentServerBlacklist:
+    default: []
+    type: comma_delimited_list
+    description: >
+      List of server hostnames to blacklist from any triggered deployments.
+
+
+parameter_groups:
+- label: deprecated
+  description: Do not use deprecated params, they will be removed.
+  parameters:
+    - controllerExtraConfig
+
+conditions:
+  add_vips_to_etc_hosts: {equals : [{get_param: AddVipsToEtcHosts}, True]}
+  control_fixed_ip_not_set: {equals : [{get_param: ControlFixedIPs}, []]}
+
+resources:
+
+  VipHosts:
+    type: OS::Heat::Value
+    properties:
+      type: string
+      value:
+        list_join:
+        - "\n"
+        - - str_replace:
+              template: IP  HOST
+              params:
+                IP: {get_attr: [VipMap, net_ip_map, ctlplane]}
+                HOST: {get_param: CloudNameCtlplane}
+          - str_replace:
+              template: IP  HOST
+              params:
+                IP: {get_attr: [VipMap, net_ip_map, storage]}
+                HOST: {get_param: CloudNameStorage}
+  # Special case StorageMgmt hostname param, which is CloudNameStorageManagement
+          - str_replace:
+              template: IP  HOST
+              params:
+                IP: {get_attr: [VipMap, net_ip_map, storage_mgmt]}
+                HOST: {get_param: CloudNameStorageManagement}
+  # Special case the Internal API hostname param, which is CloudNameInternal
+          - str_replace:
+              template: IP  HOST
+              params:
+                IP: {get_attr: [VipMap, net_ip_map, internal_api]}
+                HOST: {get_param: CloudNameInternal}
+  # Special case the External hostname param, which is CloudName
+          - str_replace:
+              template: IP  HOST
+              params:
+                IP: {get_attr: [VipMap, net_ip_map, external]}
+                HOST: {get_param: CloudName}
+          - str_replace:
+              template: IP  HOST
+              params:
+                IP: {get_attr: [VipMap, net_ip_map, cephmetrics]}
+                HOST: {get_param: CloudNameCephMetrics}
+
+  HeatAuthEncryptionKey:
+    type: OS::TripleO::RandomString
+
+  PcsdPassword:
+    type: OS::TripleO::RandomString
+    properties:
+      length: 16
+
+  HorizonSecret:
+    type: OS::TripleO::RandomString
+    properties:
+      length: 10
+
+  NetCidrMapValue:
+    type: OS::Heat::Value
+    properties:
+      type: json
+      value:
+        map_replace:
+        - map_merge:
+          - {get_attr: [Networks, net_cidr_map]}
+          - ctlplane: {get_attr: [ControlVirtualIP, subnets, 0, cidr]}
+        - keys:
+            ctlplane: {get_param: NeutronControlPlaneID}
+          values:
+            disabled: {get_attr: [ControlVirtualIP, subnets, 0, cidr]}
+
+  ServiceNetMap:
+    type: OS::TripleO::ServiceNetMap
+
+  EndpointMap:
+    type: OS::TripleO::EndpointMap
+    properties:
+      CloudEndpoints:
+        ctlplane: {get_param: CloudNameCtlplane}
+        storage: {get_param: CloudNameStorage}
+  # Special case StorageMgmt hostname param, which is CloudNameStorageManagement
+        storage_mgmt: {get_param: CloudNameStorageManagement}
+  # Special case the Internal API hostname param, which is CloudNameInternal
+        internal_api: {get_param: CloudNameInternal}
+  # Special case the External hostname param, which is CloudName
+        external: {get_param: CloudName}
+        cephmetrics: {get_param: CloudNameCephMetrics}
+      NetIpMap: {get_attr: [VipMap, net_ip_map]}
+      ServiceNetMap: {get_attr: [ServiceNetMap, service_net_map]}
+
+  EndpointMapData:
+    type: OS::Heat::Value
+    properties:
+      type: json
+      value:
+        map_merge:
+          - {get_attr: [EndpointMap, endpoint_map]}
+          - {get_param: EndpointMapOverride}
+
+  SshKnownHostsConfig:
+    type: OS::TripleO::Ssh::KnownHostsConfig
+    properties:
+      known_hosts:
+        list_join:
+          - ''
+          
+          - {get_attr: [Controller, known_hosts_entry]}
+          
+          - {get_attr: [ComputeHCI, known_hosts_entry]}
+          
+
+  # Jinja loop for Role in roles_data.yaml
+
+  # Resources generated for Controller Role
+  ControllerServiceChain:
+    type: OS::TripleO::Services
+    properties:
+      Services:
+        get_param: ControllerServices
+      ServiceNetMap: {get_attr: [ServiceNetMap, service_net_map]}
+      ServiceData:
+        net_cidr_map: {get_attr: [NetCidrMapValue, value]}
+      EndpointMap: {get_attr: [EndpointMapData, value]}
+      DefaultPasswords: {get_attr: [DefaultPasswords, passwords]}
+      RoleName: Controller
+      RoleParameters:
+        map_merge:
+          - {}
+          - get_param: ControllerParameters
+
+  # Lookup of role_data via heat outputs is slow, so workaround this by caching
+  # the value in an OS::Heat::Value resource
+  ControllerServiceChainRoleData:
+    type: OS::Heat::Value
+    properties:
+      type: json
+      value: {get_attr: [ControllerServiceChain, role_data]}
+
+  ControllerServiceConfigSettings:
+    type: OS::Heat::Value
+    properties:
+      type: json
+      value:
+        map_merge:
+          - get_attr: [ControllerServiceChainRoleData, value, config_settings]
+          
+          - get_attr: [ControllerServiceChainRoleData, value, global_config_settings]
+          
+          - get_attr: [ComputeHCIServiceChainRoleData, value, global_config_settings]
+          
+          # This next step combines two yaql passes:
+          # - The inner one does a deep merge on the service_config_settings for all roles
+          # - The outer one filters the map based on the services enabled for the role
+          #   then merges the result into one map.
+          - yaql:
+              expression: let(root => $) -> $.data.map.items().where($[0] in coalesce($root.data.services, [])).select($[1]).reduce($1.mergeWith($2), {})
+              data:
+                map:
+                  yaql:
+                    expression: $.data.where($ != null).reduce($1.mergeWith($2), {})
+                    data:
+                    
+                      - get_attr: [ControllerServiceChainRoleData, value, service_config_settings]
+                    
+                      - get_attr: [ComputeHCIServiceChainRoleData, value, service_config_settings]
+                    
+                services: {get_attr: [ControllerServiceNames, value]}
+
+  ControllerMergedConfigSettings:
+    type: OS::Heat::Value
+    properties:
+      type: json
+      value:
+        config_settings: {}
+        global_config_settings: {}
+        service_config_settings: {}
+        merged_config_settings:
+          map_merge:
+          - get_attr: [ControllerServiceConfigSettings, value]
+          - get_param: ExtraConfig
+          - get_param: controllerExtraConfig
+          - get_param: ControllerExtraConfig
+
+  # Filter any null/None service_names which may be present due to mapping
+  # of services to OS::Heat::None
+  ControllerServiceNames:
+    type: OS::Heat::Value
+    depends_on: ControllerServiceChain
+    properties:
+      type: comma_delimited_list
+      value:
+        yaql:
+          expression: coalesce($.data, []).where($ != null)
+          data: {get_attr: [ControllerServiceChainRoleData, value, service_names]}
+
+  ControllerHostsDeployment:
+    type: OS::Heat::StructuredDeployments
+    properties:
+      name: ControllerHostsDeployment
+      config: {get_attr: [hostsConfig, config_id]}
+      servers: {get_attr: [ControllerServers, value]}
+
+  ControllerSshKnownHostsDeployment:
+    type: OS::Heat::StructuredDeployments
+    properties:
+      name: ControllerSshKnownHostsDeployment
+      config: {get_resource: SshKnownHostsConfig}
+      servers: {get_attr: [ControllerServers, value]}
+
+  ControllerAllNodesDeployment:
+    type: OS::TripleO::AllNodesDeployment
+    depends_on:
+
+      - ControllerHostsDeployment
+      - ControllerSshKnownHostsDeployment
+
+      - ComputeHCIHostsDeployment
+      - ComputeHCISshKnownHostsDeployment
+
+    properties:
+      name: ControllerAllNodesDeployment
+      config: {get_attr: [allNodesConfig, config_id]}
+      servers: {get_attr: [ControllerServers, value]}
+      input_values:
+        # Note we have to use yaql to look up the first hostname/ip in the
+        # list because heat path based attributes operate on the attribute
+        # inside the ResourceGroup, not the exposed list ref discussion in
+        # https://bugs.launchpad.net/heat/+bug/1640488
+        # The coalesce is needed because $.data is None during heat validation
+        bootstrap_nodeid:
+          yaql:
+            expression: coalesce($.data, []).first(null)
+            data: {get_attr: [Controller, hostname]}
+        bootstrap_nodeid_ip:
+          yaql:
+            expression: coalesce($.data, []).first(null)
+            data: {get_attr: [Controller, ip_address]}
+
+  ControllerAllNodesValidationDeployment:
+    type: OS::Heat::StructuredDeployments
+    depends_on: ControllerAllNodesDeployment
+    properties:
+      name: ControllerAllNodesValidationDeployment
+      config: {get_resource: AllNodesValidationConfig}
+      servers: {get_attr: [ControllerServers, value]}
+
+  ControllerIpListMap:
+    type: OS::TripleO::Network::Ports::NetIpListMap
+    properties:
+      ControlPlaneIpList: {get_attr: [Controller, ip_address]}
+      StorageIpList: {get_attr: [Controller, storage_ip_address]}
+      StorageMgmtIpList: {get_attr: [Controller, storage_mgmt_ip_address]}
+      InternalApiIpList: {get_attr: [Controller, internal_api_ip_address]}
+      TenantIpList: {get_attr: [Controller, tenant_ip_address]}
+      ExternalIpList: {get_attr: [Controller, external_ip_address]}
+      ManagementIpList: {get_attr: [Controller, management_ip_address]}
+      CephMetricsIpList: {get_attr: [Controller, cephmetrics_ip_address]}
+      EnabledServices: {get_attr: [ControllerServiceNames, value]}
+      ServiceNetMap: {get_attr: [ServiceNetMap, service_net_map_lower]}
+      ServiceHostnameList: {get_attr: [Controller, hostname]}
+      NetworkHostnameMap: {get_attr: [ControllerNetworkHostnameMap, value]}
+
+  ControllerNetworkHostnameMap:
+    type: OS::Heat::Value
+    properties:
+      type: json
+      value:
+        # Note (shardy) this somewhat complex yaql may be replaced
+        # with a map_deep_merge function in ocata.  It merges the
+        # list of maps, but appends to colliding lists so we can
+        # create a map of lists for all nodes for each network
+        yaql:
+          expression: dict($.data.where($ != null).flatten().selectMany($.items()).groupBy($[0], $[1]).select([$[0], $[1].flatten()]))
+          data:
+            - {get_attr: [Controller, hostname_map]}
+
+  Controller:
+    type: OS::Heat::ResourceGroup
+    depends_on: Networks
+    update_policy:
+      batch_create:
+        max_batch_size: {get_param: NodeCreateBatchSize}
+    properties:
+      count: {get_param: ControllerCount}
+      removal_policies: {get_param: ControllerRemovalPolicies}
+      resource_def:
+        type: OS::TripleO::Controller
+        properties:
+          CloudDomain: {get_param: CloudDomain}
+          ServiceNetMap: {get_attr: [ServiceNetMap, service_net_map]}
+          EndpointMap: {get_attr: [EndpointMapData, value]}
+          Hostname:
+            str_replace:
+              template: {get_param: ControllerHostnameFormat}
+              params:
+                '%stackname%': {get_param: 'OS::stack_name'}
+          NodeIndex: '%index%'
+          # Note, SchedulerHints must be defined here, not only in the
+          # nested template, as it can contain %index%
+          ControllerSchedulerHints:
+            map_merge:
+              - {get_param: ControllerSchedulerHints}
+          ServiceConfigSettings: {get_attr: [ControllerServiceConfigSettings, value]}
+          ServiceNames: {get_attr: [ControllerServiceNames, value]}
+          MonitoringSubscriptions: {get_attr: [ControllerServiceChainRoleData, value, monitoring_subscriptions]}
+          LoggingSources: {get_attr: [ControllerServiceChainRoleData, value, logging_sources]}
+          LoggingGroups: {get_attr: [ControllerServiceChainRoleData, value, logging_groups]}
+          ServiceMetadataSettings: {get_attr: [ControllerServiceChainRoleData, value, service_metadata_settings]}
+          DeploymentServerBlacklistDict: {get_attr: [DeploymentServerBlacklistDict, value]}
+          RoleParameters:
+            map_merge:
+              - {}
+              - get_param: ControllerParameters
+
+  # Resources generated for ComputeHCI Role
+  ComputeHCIServiceChain:
+    type: OS::TripleO::Services
+    properties:
+      Services:
+        get_param: ComputeHCIServices
+      ServiceNetMap: {get_attr: [ServiceNetMap, service_net_map]}
+      ServiceData:
+        net_cidr_map: {get_attr: [NetCidrMapValue, value]}
+      EndpointMap: {get_attr: [EndpointMapData, value]}
+      DefaultPasswords: {get_attr: [DefaultPasswords, passwords]}
+      RoleName: ComputeHCI
+      RoleParameters:
+        map_merge:
+          - {}
+          - get_param: ComputeHCIParameters
+
+  # Lookup of role_data via heat outputs is slow, so workaround this by caching
+  # the value in an OS::Heat::Value resource
+  ComputeHCIServiceChainRoleData:
+    type: OS::Heat::Value
+    properties:
+      type: json
+      value: {get_attr: [ComputeHCIServiceChain, role_data]}
+
+  ComputeHCIServiceConfigSettings:
+    type: OS::Heat::Value
+    properties:
+      type: json
+      value:
+        map_merge:
+          - get_attr: [ComputeHCIServiceChainRoleData, value, config_settings]
+          
+          - get_attr: [ControllerServiceChainRoleData, value, global_config_settings]
+          
+          - get_attr: [ComputeHCIServiceChainRoleData, value, global_config_settings]
+          
+          # This next step combines two yaql passes:
+          # - The inner one does a deep merge on the service_config_settings for all roles
+          # - The outer one filters the map based on the services enabled for the role
+          #   then merges the result into one map.
+          - yaql:
+              expression: let(root => $) -> $.data.map.items().where($[0] in coalesce($root.data.services, [])).select($[1]).reduce($1.mergeWith($2), {})
+              data:
+                map:
+                  yaql:
+                    expression: $.data.where($ != null).reduce($1.mergeWith($2), {})
+                    data:
+                    
+                      - get_attr: [ControllerServiceChainRoleData, value, service_config_settings]
+                    
+                      - get_attr: [ComputeHCIServiceChainRoleData, value, service_config_settings]
+                    
+                services: {get_attr: [ComputeHCIServiceNames, value]}
+
+  ComputeHCIMergedConfigSettings:
+    type: OS::Heat::Value
+    properties:
+      type: json
+      value:
+        config_settings: {}
+        global_config_settings: {}
+        service_config_settings: {}
+        merged_config_settings:
+          map_merge:
+          - get_attr: [ComputeHCIServiceConfigSettings, value]
+          - get_param: ExtraConfig
+          - get_param: ComputeHCIExtraConfig
+
+  # Filter any null/None service_names which may be present due to mapping
+  # of services to OS::Heat::None
+  ComputeHCIServiceNames:
+    type: OS::Heat::Value
+    depends_on: ComputeHCIServiceChain
+    properties:
+      type: comma_delimited_list
+      value:
+        yaql:
+          expression: coalesce($.data, []).where($ != null)
+          data: {get_attr: [ComputeHCIServiceChainRoleData, value, service_names]}
+
+  ComputeHCIHostsDeployment:
+    type: OS::Heat::StructuredDeployments
+    properties:
+      name: ComputeHCIHostsDeployment
+      config: {get_attr: [hostsConfig, config_id]}
+      servers: {get_attr: [ComputeHCIServers, value]}
+
+  ComputeHCISshKnownHostsDeployment:
+    type: OS::Heat::StructuredDeployments
+    properties:
+      name: ComputeHCISshKnownHostsDeployment
+      config: {get_resource: SshKnownHostsConfig}
+      servers: {get_attr: [ComputeHCIServers, value]}
+
+  ComputeHCIAllNodesDeployment:
+    type: OS::TripleO::AllNodesDeployment
+    depends_on:
+
+      - ControllerHostsDeployment
+      - ControllerSshKnownHostsDeployment
+
+      - ComputeHCIHostsDeployment
+      - ComputeHCISshKnownHostsDeployment
+
+    properties:
+      name: ComputeHCIAllNodesDeployment
+      config: {get_attr: [allNodesConfig, config_id]}
+      servers: {get_attr: [ComputeHCIServers, value]}
+      input_values:
+        # Note we have to use yaql to look up the first hostname/ip in the
+        # list because heat path based attributes operate on the attribute
+        # inside the ResourceGroup, not the exposed list ref discussion in
+        # https://bugs.launchpad.net/heat/+bug/1640488
+        # The coalesce is needed because $.data is None during heat validation
+        bootstrap_nodeid:
+          yaql:
+            expression: coalesce($.data, []).first(null)
+            data: {get_attr: [ComputeHCI, hostname]}
+        bootstrap_nodeid_ip:
+          yaql:
+            expression: coalesce($.data, []).first(null)
+            data: {get_attr: [ComputeHCI, ip_address]}
+
+  ComputeHCIAllNodesValidationDeployment:
+    type: OS::Heat::StructuredDeployments
+    depends_on: ComputeHCIAllNodesDeployment
+    properties:
+      name: ComputeHCIAllNodesValidationDeployment
+      config: {get_resource: AllNodesValidationConfig}
+      servers: {get_attr: [ComputeHCIServers, value]}
+
+  ComputeHCIIpListMap:
+    type: OS::TripleO::Network::Ports::NetIpListMap
+    properties:
+      ControlPlaneIpList: {get_attr: [ComputeHCI, ip_address]}
+      StorageIpList: {get_attr: [ComputeHCI, storage_ip_address]}
+      StorageMgmtIpList: {get_attr: [ComputeHCI, storage_mgmt_ip_address]}
+      InternalApiIpList: {get_attr: [ComputeHCI, internal_api_ip_address]}
+      TenantIpList: {get_attr: [ComputeHCI, tenant_ip_address]}
+      ExternalIpList: {get_attr: [ComputeHCI, external_ip_address]}
+      ManagementIpList: {get_attr: [ComputeHCI, management_ip_address]}
+      CephMetricsIpList: {get_attr: [ComputeHCI, cephmetrics_ip_address]}
+      EnabledServices: {get_attr: [ComputeHCIServiceNames, value]}
+      ServiceNetMap: {get_attr: [ServiceNetMap, service_net_map_lower]}
+      ServiceHostnameList: {get_attr: [ComputeHCI, hostname]}
+      NetworkHostnameMap: {get_attr: [ComputeHCINetworkHostnameMap, value]}
+
+  ComputeHCINetworkHostnameMap:
+    type: OS::Heat::Value
+    properties:
+      type: json
+      value:
+        # Note (shardy) this somewhat complex yaql may be replaced
+        # with a map_deep_merge function in ocata.  It merges the
+        # list of maps, but appends to colliding lists so we can
+        # create a map of lists for all nodes for each network
+        yaql:
+          expression: dict($.data.where($ != null).flatten().selectMany($.items()).groupBy($[0], $[1]).select([$[0], $[1].flatten()]))
+          data:
+            - {get_attr: [ComputeHCI, hostname_map]}
+
+  ComputeHCI:
+    type: OS::Heat::ResourceGroup
+    depends_on: Networks
+    update_policy:
+      batch_create:
+        max_batch_size: {get_param: NodeCreateBatchSize}
+    properties:
+      count: {get_param: ComputeHCICount}
+      removal_policies: {get_param: ComputeHCIRemovalPolicies}
+      resource_def:
+        type: OS::TripleO::ComputeHCI
+        properties:
+          CloudDomain: {get_param: CloudDomain}
+          ServiceNetMap: {get_attr: [ServiceNetMap, service_net_map]}
+          EndpointMap: {get_attr: [EndpointMapData, value]}
+          Hostname:
+            str_replace:
+              template: {get_param: ComputeHCIHostnameFormat}
+              params:
+                '%stackname%': {get_param: 'OS::stack_name'}
+          NodeIndex: '%index%'
+          # Note, SchedulerHints must be defined here, not only in the
+          # nested template, as it can contain %index%
+          ComputeHCISchedulerHints:
+            map_merge:
+              - {get_param: ComputeHCISchedulerHints}
+          ServiceConfigSettings: {get_attr: [ComputeHCIServiceConfigSettings, value]}
+          ServiceNames: {get_attr: [ComputeHCIServiceNames, value]}
+          MonitoringSubscriptions: {get_attr: [ComputeHCIServiceChainRoleData, value, monitoring_subscriptions]}
+          LoggingSources: {get_attr: [ComputeHCIServiceChainRoleData, value, logging_sources]}
+          LoggingGroups: {get_attr: [ComputeHCIServiceChainRoleData, value, logging_groups]}
+          ServiceMetadataSettings: {get_attr: [ComputeHCIServiceChainRoleData, value, service_metadata_settings]}
+          DeploymentServerBlacklistDict: {get_attr: [DeploymentServerBlacklistDict, value]}
+          RoleParameters:
+            map_merge:
+              - {}
+              - get_param: ComputeHCIParameters
+
+
+
+  ControllerServers:
+    type: OS::Heat::Value
+    depends_on: Controller
+    properties:
+      type: json
+      value:
+        yaql:
+          expression: let(servers=>switch(isDict($.data.servers) => $.data.servers, true => {})) -> $servers.deleteAll($servers.keys().where($servers[$] = null))
+          data:
+            servers: {get_attr: [Controller, attributes, nova_server_resource]}
+
+  ComputeHCIServers:
+    type: OS::Heat::Value
+    depends_on: ComputeHCI
+    properties:
+      type: json
+      value:
+        yaql:
+          expression: let(servers=>switch(isDict($.data.servers) => $.data.servers, true => {})) -> $servers.deleteAll($servers.keys().where($servers[$] = null))
+          data:
+            servers: {get_attr: [ComputeHCI, attributes, nova_server_resource]}
+
+
+  # This is a different format to *Servers, as it creates a map of lists
+  # whereas *Servers creates a map of maps with keys of the nested resource names
+  ServerIdMap:
+    type: OS::Heat::Value
+    properties:
+      value:
+        server_ids:
+
+          Controller: {get_attr: [Controller, nova_server_resource]}
+
+          ComputeHCI: {get_attr: [ComputeHCI, nova_server_resource]}
+
+        bootstrap_server_id:
+          yaql:
+            expression: coalesce($.data, []).first(null)
+            data: {get_attr: [Controller, nova_server_resource]}
+
+  # This resource just creates a dict out of the DeploymentServerBlacklist,
+  # which is a list. The dict is used in the role templates to set a condition
+  # on whether to create the deployment resources. We can't use the list
+  # directly because there is no way to ask Heat if a list contains a specific
+  # value.
+  DeploymentServerBlacklistDict:
+    type: OS::Heat::Value
+    properties:
+      type: json
+      value:
+        map_merge:
+          repeat:
+            template:
+              hostname: 1
+            for_each:
+              hostname: {get_param: DeploymentServerBlacklist}
+
+  hostsConfig:
+    type: OS::TripleO::Hosts::SoftwareConfig
+    properties:
+      hosts:
+        list_join:
+        - "\n"
+        - - if:
+            - add_vips_to_etc_hosts
+            - {get_attr: [VipHosts, value]}
+            - ''
+        -
+
+          - list_join:
+            - ""
+            - {get_attr: [Controller, hosts_entry]}
+
+          - list_join:
+            - ""
+            - {get_attr: [ComputeHCI, hosts_entry]}
+
+        - {get_param: ExtraHostFileEntries}
+
+  allNodesConfig:
+    type: OS::TripleO::AllNodes::SoftwareConfig
+    properties:
+      cloud_name_storage: {get_param: CloudNameStorage}
+  # Special case StorageMgmt hostname param, which is CloudNameStorageManagement
+      cloud_name_storage_mgmt: {get_param: CloudNameStorageManagement}
+  # Special case the Internal API hostname param, which is CloudNameInternal
+      cloud_name_internal_api: {get_param: CloudNameInternal}
+  # Special case the External hostname param, which is CloudName
+      cloud_name_external: {get_param: CloudName}
+      cloud_name_cephmetrics: {get_param: CloudNameCephMetrics}
+      cloud_name_ctlplane: {get_param: CloudNameCtlplane}
+      enabled_services:
+        list_join:
+          - ','
+
+          - {get_attr: [ControllerServiceNames, value]}
+
+          - {get_attr: [ComputeHCIServiceNames, value]}
+
+      cellv2_discovery_hosts:
+        # Collects compute hostnames for all roles with a service that requires cellv2 host discovery
+        list_join:
+          - ','
+          - yaql:
+              expression: coalesce($.data.e.zip($.data.l).where($[0]).select($[1]).flatten(),  [])
+              data:
+                e: # list of true/fails for whether cellsv2 host discovery is required for the roles
+                  - {get_attr: [ControllerServiceChainRoleData, value, cellv2_discovery]}
+                  - {get_attr: [ComputeHCIServiceChainRoleData, value, cellv2_discovery]}
+                l: # list of list of compute hostnames for the roles
+                  - {get_attr: [Controller, hostname_map, canonical]}
+                  - {get_attr: [ComputeHCI, hostname_map, canonical]}
+      controller_ips: {get_attr: [Controller, ip_address]}
+      controller_names: {get_attr: [Controller, hostname]}
+      service_ips:
+        # Note (shardy) this somewhat complex yaql may be replaced
+        # with a map_deep_merge function in ocata.  It merges the
+        # list of maps, but appends to colliding lists when a service
+        # is deployed on more than one role
+        yaql:
+          expression: dict($.data.l.where($ != null).selectMany($.items()).groupBy($[0], $[1]).select([$[0], $[1].flatten()]))
+          data:
+            l:
+
+              - {get_attr: [ControllerIpListMap, service_ips]}
+
+              - {get_attr: [ComputeHCIIpListMap, service_ips]}
+
+      service_node_names:
+        yaql:
+          expression: dict($.data.l.where($ != null).selectMany($.items()).groupBy($[0], $[1]).select([$[0], $[1].flatten()]))
+          data:
+            l:
+
+              - {get_attr: [ControllerIpListMap, service_hostnames]}
+
+              - {get_attr: [ComputeHCIIpListMap, service_hostnames]}
+
+      short_service_node_names:
+        yaql:
+          expression: dict($.data.l.where($ != null).selectMany($.items()).groupBy($[0], $[1]).select([$[0], $[1].flatten()]))
+          data:
+            l:
+
+              - {get_attr: [ControllerIpListMap, short_service_hostnames]}
+
+              - {get_attr: [ComputeHCIIpListMap, short_service_hostnames]}
+
+      short_service_bootstrap_node:
+        yaql:
+          expression: dict($.data.l.where($ != null).selectMany($.items()).groupBy($[0], $[1]).select([$[0], $[1].flatten().first()]))
+          data:
+            l:
+
+              - {get_attr: [ControllerIpListMap, short_service_bootstrap_hostnames]}
+
+              - {get_attr: [ComputeHCIIpListMap, short_service_bootstrap_hostnames]}
+
+      NetVipMap: {get_attr: [VipMap, net_ip_map]}
+      RedisVirtualIP: {get_attr: [RedisVirtualIP, ip_address]}
+      ServiceNetMap: {get_attr: [ServiceNetMap, service_net_map_lower]}
+      DeployIdentifier: {get_param: DeployIdentifier}
+      UpdateIdentifier: {get_param: UpdateIdentifier}
+
+  MysqlRootPassword:
+    type: OS::TripleO::RandomString
+    properties:
+      length: 10
+
+  RabbitCookie:
+    type: OS::TripleO::RandomString
+    properties:
+      length: 20
+      salt: {get_param: RabbitCookieSalt}
+
+  DefaultPasswords:
+    type: OS::TripleO::DefaultPasswords
+    properties:
+      DefaultMysqlRootPassword: {get_attr: [MysqlRootPassword, value]}
+      DefaultRabbitCookie: {get_attr: [RabbitCookie, value]}
+      DefaultHeatAuthEncryptionKey: {get_attr: [HeatAuthEncryptionKey, value]}
+      DefaultPcsdPassword: {get_attr: [PcsdPassword, value]}
+      DefaultHorizonSecret: {get_attr: [HorizonSecret, value]}
+
+  # creates the network architecture
+  Networks:
+    type: OS::TripleO::Network
+
+  ControlVirtualIP:
+    type: OS::TripleO::Network::Ports::ControlPlaneVipPort
+    depends_on: Networks
+    properties:
+      name: control_virtual_ip
+      network: {get_param: NeutronControlPlaneID}
+      fixed_ips:
+        if:
+        - control_fixed_ip_not_set
+        - [{subnet: {get_param: ControlPlaneSubnet}}]
+        - get_param: ControlFixedIPs
+      replacement_policy: AUTO
+
+  RedisVirtualIP:
+    depends_on: Networks
+    type: OS::TripleO::Network::Ports::RedisVipPort
+    properties:
+      ControlPlaneIP: {get_attr: [ControlVirtualIP, fixed_ips, 0, ip_address]}
+      ControlPlaneNetwork: {get_param: NeutronControlPlaneID}
+      PortName: redis_virtual_ip
+      NetworkName: {get_attr: [ServiceNetMap, service_net_map, RedisNetwork]}
+      ServiceName: redis
+      FixedIPs: {get_param: RedisVirtualFixedIPs}
+  StorageVirtualIP:
+    depends_on: Networks
+    type: OS::TripleO::Network::Ports::StorageVipPort
+    properties:
+      ControlPlaneIP: {get_attr: [ControlVirtualIP, fixed_ips, 0, ip_address]}
+      PortName: storage_virtual_ip
+      FixedIPs: {get_param: StorageVirtualFixedIPs}
+  StorageMgmtVirtualIP:
+    depends_on: Networks
+    type: OS::TripleO::Network::Ports::StorageMgmtVipPort
+    properties:
+      ControlPlaneIP: {get_attr: [ControlVirtualIP, fixed_ips, 0, ip_address]}
+      PortName: storage_management_virtual_ip
+      FixedIPs: {get_param: StorageMgmtVirtualFixedIPs}
+  InternalApiVirtualIP:
+    depends_on: Networks
+    type: OS::TripleO::Network::Ports::InternalApiVipPort
+    properties:
+      ControlPlaneIP: {get_attr: [ControlVirtualIP, fixed_ips, 0, ip_address]}
+      PortName: internal_api_virtual_ip
+      FixedIPs: {get_param: InternalApiVirtualFixedIPs}
+  # The public VIP is on the External net, falls back to ctlplane
+  PublicVirtualIP:
+    depends_on: Networks
+    type: OS::TripleO::Network::Ports::ExternalVipPort
+    properties:
+      ControlPlaneIP: {get_attr: [ControlVirtualIP, fixed_ips, 0, ip_address]}
+      ControlPlaneNetwork: {get_param: NeutronControlPlaneID}
+      PortName: public_virtual_ip
+      FixedIPs: {get_param: PublicVirtualFixedIPs}
+  CephMetricsVirtualIP:
+    depends_on: Networks
+    type: OS::TripleO::Network::Ports::CephMetricsVipPort
+    properties:
+      ControlPlaneIP: {get_attr: [ControlVirtualIP, fixed_ips, 0, ip_address]}
+      PortName: cephmetrics_virtual_ip
+      FixedIPs: {get_param: CephMetricsVirtualFixedIPs}
+
+  VipMap:
+    type: OS::TripleO::Network::Ports::NetVipMap
+    properties:
+      ControlPlaneIp: {get_attr: [ControlVirtualIP, fixed_ips, 0, ip_address]}
+      StorageIp: {get_attr: [StorageVirtualIP, ip_address]}
+      StorageIpUri: {get_attr: [StorageVirtualIP, ip_address_uri]}
+      StorageMgmtIp: {get_attr: [StorageMgmtVirtualIP, ip_address]}
+      StorageMgmtIpUri: {get_attr: [StorageMgmtVirtualIP, ip_address_uri]}
+      InternalApiIp: {get_attr: [InternalApiVirtualIP, ip_address]}
+      InternalApiIpUri: {get_attr: [InternalApiVirtualIP, ip_address_uri]}
+      ExternalIp: {get_attr: [PublicVirtualIP, ip_address]}
+      ExternalIpUri: {get_attr: [PublicVirtualIP, ip_address_uri]}
+      CephMetricsIp: {get_attr: [CephMetricsVirtualIP, ip_address]}
+      CephMetricsIpUri: {get_attr: [CephMetricsVirtualIP, ip_address_uri]}
+      # No tenant or management VIP required
+    # Because of nested get_attr functions in the KeystoneAdminVip output, we
+    # can't determine which attributes of VipMap are used until after
+    # ServiceNetMap's attribute values are available.
+    depends_on: ServiceNetMap
+
+  # All Nodes Validations
+  AllNodesValidationConfig:
+    type: OS::TripleO::AllNodes::Validation
+    properties:
+      PingTestIps:
+        list_join:
+        - ' '
+        -
+          - yaql:
+              expression: coalesce($.data, []).first(null)
+              data: {get_attr: [Controller, storage_ip_address]}
+          - yaql:
+              expression: coalesce($.data, []).first(null)
+              data: {get_attr: [Controller, storage_mgmt_ip_address]}
+          - yaql:
+              expression: coalesce($.data, []).first(null)
+              data: {get_attr: [Controller, internal_api_ip_address]}
+          - yaql:
+              expression: coalesce($.data, []).first(null)
+              data: {get_attr: [Controller, tenant_ip_address]}
+          - yaql:
+              expression: coalesce($.data, []).first(null)
+              data: {get_attr: [Controller, external_ip_address]}
+          - yaql:
+              expression: coalesce($.data, []).first(null)
+              data: {get_attr: [Controller, management_ip_address]}
+          - yaql:
+              expression: coalesce($.data, []).first(null)
+              data: {get_attr: [Controller, cephmetrics_ip_address]}
+
+  UpdateWorkflow:
+    type: OS::TripleO::Tasks::UpdateWorkflow
+    depends_on:
+
+      - ControllerAllNodesDeployment
+
+      - ComputeHCIAllNodesDeployment
+
+    properties:
+      servers:
+
+        Controller: {get_attr: [ControllerServers, value]}
+
+        ComputeHCI: {get_attr: [ComputeHCIServers, value]}
+
+      input_values:
+        deploy_identifier: {get_param: DeployIdentifier}
+        update_identifier: {get_param: UpdateIdentifier}
+
+  # Optional ExtraConfig for all nodes - all roles are passed in here, but
+  # the nested template may configure each role differently (or not at all)
+  AllNodesExtraConfig:
+    type: OS::TripleO::AllNodesExtraConfig
+    depends_on:
+      - UpdateWorkflow
+
+      - ControllerAllNodesValidationDeployment
+
+      - ComputeHCIAllNodesValidationDeployment
+
+    properties:
+      servers:
+
+        Controller: {get_attr: [ControllerServers, value]}
+
+        ComputeHCI: {get_attr: [ComputeHCIServers, value]}
+
+
+  BlacklistedIpAddresses:
+    type: OS::Heat::Value
+    properties:
+      value:
+        list_concat:
+
+          - {get_attr: [Controller, blacklist_ip_address]}
+
+          - {get_attr: [ComputeHCI, blacklist_ip_address]}
+
+
+  BlacklistedHostnames:
+    type: OS::Heat::Value
+    properties:
+      value:
+        list_concat:
+
+          - {get_attr: [Controller, blacklist_hostname]}
+
+          - {get_attr: [ComputeHCI, blacklist_hostname]}
+
+
+  # Post deployment steps for all roles
+  AllNodesDeploySteps:
+    type: OS::TripleO::PostDeploySteps
+    depends_on:
+      - AllNodesExtraConfig
+
+      - ControllerAllNodesDeployment
+
+      - ComputeHCIAllNodesDeployment
+
+    properties:
+      servers:
+
+        Controller: {get_attr: [ControllerServers, value]}
+
+        ComputeHCI: {get_attr: [ComputeHCIServers, value]}
+
+      stack_name: {get_param: 'OS::stack_name'}
+      EndpointMap: {get_attr: [EndpointMapData, value]}
+      ctlplane_service_ips:
+        # Note (shardy) this somewhat complex yaql may be replaced
+        # with a map_deep_merge function in ocata.  It merges the
+        # list of maps, but appends to colliding lists when a service
+        # is deployed on more than one role
+        yaql:
+          expression: dict($.data.l.where($ != null).selectMany($.items()).groupBy($[0], $[1]).select([$[0], $[1].flatten()]))
+          data:
+            l:
+
+              - {get_attr: [ControllerIpListMap, ctlplane_service_ips]}
+
+              - {get_attr: [ComputeHCIIpListMap, ctlplane_service_ips]}
+
+      role_data:
+
+        Controller:
+          map_merge:
+          - {get_attr: [ControllerServiceChainRoleData, value]}
+          - {get_attr: [ControllerMergedConfigSettings, value]}
+
+        ComputeHCI:
+          map_merge:
+          - {get_attr: [ComputeHCIServiceChainRoleData, value]}
+          - {get_attr: [ComputeHCIMergedConfigSettings, value]}
+
+      blacklisted_ip_addresses: {get_attr: [BlacklistedIpAddresses, value]}
+      blacklisted_hostnames: {get_attr: [BlacklistedHostnames, value]}
+
+  ServerOsCollectConfigData:
+    type: OS::Heat::Value
+    properties:
+      type: json
+      value:
+
+        Controller: {get_attr: [Controller, attributes, os_collect_config]}
+
+        ComputeHCI: {get_attr: [ComputeHCI, attributes, os_collect_config]}
+
+
+  DeployedServerEnvironment:
+    type: OS::TripleO::DeployedServerEnvironment
+    properties:
+      RoleCounts:
+
+        ControllerDeployedServerCount: {get_param: ControllerCount}
+
+        ComputeHCIDeployedServerCount: {get_param: ComputeHCICount}
+
+      VipMap:
+        map_merge:
+          - {get_attr: [VipMap, net_ip_map]}
+          - redis: {get_attr: [RedisVirtualIP, ip_address]}
+      DeployedServerPortMap:
+        map_merge:
+          list_concat:
+
+              - {get_attr: [Controller, deployed_server_port_map]}
+
+              - {get_attr: [ComputeHCI, deployed_server_port_map]}
+
+      DeployedServerDeploymentSwiftDataMap:
+        map_merge:
+          list_concat:
+
+              - {get_attr: [Controller, deployed_server_deployment_swift_data_map]}
+
+              - {get_attr: [ComputeHCI, deployed_server_deployment_swift_data_map]}
+
+      DefaultRouteIp:
+        str_split:
+          - ':'
+          - str_split:
+            - '/'
+            - {get_attr: [ServerOsCollectConfigData, value, Controller, '0', request, metadata_url]}
+            - 2
+          - 0
+
+outputs:
+  ManagedEndpoints:
+    description: Asserts that the keystone endpoints have been provisioned.
+    value: true
+  KeystoneURL:
+    description: URL for the Overcloud Keystone service
+    value: {get_attr: [EndpointMapData, value, KeystonePublic, uri]}
+  KeystoneAdminVip:
+    description: Keystone Admin VIP endpoint
+    # Note that these nested get_attr functions require a dependency
+    # relationship between VipMap and ServiceNetMap, since we can't determine
+    # which attributes of VipMap are used until after ServiceNetMap's attribute
+    # values are available. If this is ever reworked to not use nested
+    # get_attr, that dependency can be removed.
+    value: {get_attr: [VipMap, net_ip_map, {get_attr: [ServiceNetMap, service_net_map, KeystoneAdminApiNetwork]}]}
+  EndpointMap:
+    description: |
+      Mapping of the resources with the needed info for their endpoints.
+      This includes the protocol used, the IP, port and also a full
+      representation of the URI.
+    value: {get_attr: [EndpointMapData, value]}
+  HostsEntry:
+    description: |
+      The content that should be appended to your /etc/hosts if you want to get
+      hostname-based access to the deployed nodes (useful for testing without
+      setting up a DNS).
+    value:
+      list_join:
+      - "\n"
+      - - {get_attr: [hostsConfig, hosts_entries]}
+      - - {get_attr: [VipHosts, value]}
+  EnabledServices:
+    description: The services enabled on each role
+    value:
+
+      Controller: {get_attr: [ControllerServiceNames, value]}
+
+      ComputeHCI: {get_attr: [ComputeHCIServiceNames, value]}
+
+  RoleData:
+    description: The configuration data associated with each role
+    value:
+
+      Controller:
+        map_merge:
+        - {get_attr: [ControllerServiceChainRoleData, value]}
+        - {get_attr: [ControllerMergedConfigSettings, value]}
+
+      ComputeHCI:
+        map_merge:
+        - {get_attr: [ComputeHCIServiceChainRoleData, value]}
+        - {get_attr: [ComputeHCIMergedConfigSettings, value]}
+
+  RoleConfig:
+    description: The configuration workflows associated with each role
+    value: {get_attr: [AllNodesDeploySteps, RoleConfig]}
+  RoleNetIpMap:
+    description: Mapping of each network to a list of IPs for each role
+    value:
+
+      Controller: {get_attr: [ControllerIpListMap, net_ip_map]}
+
+      ComputeHCI: {get_attr: [ComputeHCIIpListMap, net_ip_map]}
+
+  RoleNetHostnameMap:
+    description: Mapping of each network to a list of hostnames for each role
+    value:
+
+      Controller: {get_attr: [ControllerNetworkHostnameMap, value]}
+
+      ComputeHCI: {get_attr: [ComputeHCINetworkHostnameMap, value]}
+
+  RoleTags:
+    description: Tags for each role, as defined in roles_data.yaml
+    value:
+      Controller: ['primary', 'controller']
+      ComputeHCI: []
+  ServerOsCollectConfigData:
+    description: The os-collect-config configuration associated with each server resource
+    value: {get_attr: [ServerOsCollectConfigData, value]}
+  VipMap:
+    description: Mapping of each network to VIP addresses. Also includes the Redis VIP.
+    value:
+      map_merge:
+        - {get_attr: [VipMap, net_ip_map]}
+        - redis: {get_attr: [RedisVirtualIP, ip_address]}
+  ServerIdData:
+    description: Mapping of each role to a list of nova server IDs and the bootstrap ID
+    value: {get_attr: [ServerIdMap, value]}
+  DeployedServerEnvironment:
+    description:
+      Environment data that can be used as input into the services stack when
+      using split-stack.
+    value: {get_attr: [DeployedServerEnvironment, deployed_server_environment]}

@@ -1,0 +1,28 @@
+all:
+  hosts:
+    cephmetrics:
+      ansible_host: 172.21.1.175
+      ansible_ssh_common_args: -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+      ansible_ssh_private_key_file: /home/stack/stack.pem
+      ansible_ssh_user: cloud-user
+    controller-0:
+      ansible_host: 192.168.120.11
+      ansible_ssh_user: heat-admin
+      cephmetrics_ip: 172.17.5.201
+  vars:
+    grafana:
+      admin_password: admin
+    prometheus:
+      etc_hosts:
+        cephmetrics: 172.21.1.175
+        controller-0: 172.17.5.201
+ceph-grafana:
+  hosts:
+    cephmetrics: {}
+mgrs:
+  hosts:
+    controller-0: {}
+mons:
+  hosts:
+    controller-0: {}
+

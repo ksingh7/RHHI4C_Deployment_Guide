@@ -1,0 +1,46 @@
+# ******************************************************************************
+# DEPRECATED: Modify networks used for custom roles by modifying the role file
+# in the roles/ directory, or disable the network entirely by setting network to
+# "enabled: false" in network_data.yaml.
+# ******************************************************************************
+# Enable the creation of Neutron networks for isolated Overcloud
+# traffic and configure each role to assign ports (related
+# to that role) on these networks. This version of the environment
+# has no dedicated VLAN for tunneling, for deployments that use
+# VLAN mode, flat provider networks, etc.
+resource_registry:
+  # networks as defined in network_data.yaml, except for tenant net
+  OS::TripleO::Network::Storage: ../network/storage.yaml
+  OS::TripleO::Network::StorageMgmt: ../network/storage_mgmt.yaml
+  OS::TripleO::Network::InternalApi: ../network/internal_api.yaml
+  OS::TripleO::Network::External: ../network/external.yaml
+  OS::TripleO::Network::Management: ../network/management.yaml
+  OS::TripleO::Network::CephMetrics: ../network/cephmetrics.yaml
+  OS::TripleO::Network::Tenant: OS::Heat::None
+
+  # Port assignments for the VIPs
+  OS::TripleO::Network::Ports::StorageVipPort: ../network/ports/storage.yaml
+  OS::TripleO::Network::Ports::StorageMgmtVipPort: ../network/ports/storage_mgmt.yaml
+  OS::TripleO::Network::Ports::InternalApiVipPort: ../network/ports/internal_api.yaml
+  OS::TripleO::Network::Ports::ExternalVipPort: ../network/ports/external.yaml
+  OS::TripleO::Network::Ports::CephMetricsVipPort: ../network/ports/cephmetrics.yaml
+  OS::TripleO::Network::Ports::RedisVipPort: ../network/ports/vip.yaml
+
+  # Port assignments for each role are determined by the role definition.
+  # Port assignments for the Controller role.
+  OS::TripleO::Controller::Ports::StoragePort: ../network/ports/storage.yaml
+  OS::TripleO::Controller::Ports::StorageMgmtPort: ../network/ports/storage_mgmt.yaml
+  OS::TripleO::Controller::Ports::InternalApiPort: ../network/ports/internal_api.yaml
+  OS::TripleO::Controller::Ports::TenantPort: ../network/ports/noop.yaml
+  OS::TripleO::Controller::Ports::ExternalPort: ../network/ports/external.yaml
+  OS::TripleO::Controller::Ports::ManagementPort: ../network/ports/noop.yaml
+  OS::TripleO::Controller::Ports::CephMetricsPort: ../network/ports/cephmetrics.yaml
+
+  # Port assignments for the ComputeHCI role.
+  OS::TripleO::ComputeHCI::Ports::StoragePort: ../network/ports/storage.yaml
+  OS::TripleO::ComputeHCI::Ports::StorageMgmtPort: ../network/ports/storage_mgmt.yaml
+  OS::TripleO::ComputeHCI::Ports::InternalApiPort: ../network/ports/internal_api.yaml
+  OS::TripleO::ComputeHCI::Ports::TenantPort: ../network/ports/noop.yaml
+  OS::TripleO::ComputeHCI::Ports::ExternalPort: ../network/ports/noop.yaml
+  OS::TripleO::ComputeHCI::Ports::ManagementPort: ../network/ports/noop.yaml
+  OS::TripleO::ComputeHCI::Ports::CephMetricsPort: ../network/ports/cephmetrics.yaml

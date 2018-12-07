@@ -1,0 +1,99 @@
+parameter_defaults:
+  NodeRootPassword: refarch123 
+  Debug: true
+  DockerPuppetDebug: True
+
+  ControllerCount: 1
+  OvercloudControllerFlavor: Controller
+  ControllerHostnameFormat: 'controller-%index%'
+
+  ComputeHCICount: 5
+  OvercloudComputeHCIFlavor: ComputeHCI
+  ComputeHCIHostnameFormat: 'osd-compute-%index%'
+
+  # unncessary if using -p plan-environment-derived-params.yaml 
+  ComputeHCIParameters:
+    NovaReservedHostMemory: 48500
+  ComputeHCIExtraConfig:
+    nova::cpu_allocation_ratio: 0.500000
+
+#  ControllerSchedulerHints:
+#    'capabilities:node': 'controller-%index%'
+#  ComputeHCISchedulerHints:
+#    'capabilities:node': 'osd-compute-%index%'
+#  R630ComputeSchedulerHints:
+#    'capabilities:node': 'compute-r630-%index%'
+#  R220ComputeSchedulerHints:
+#    'capabilities:node': 'compute-r220-%index%'
+
+
+  ControllerSchedulerHints:
+    'capabilities:node': 'controller-%index%'
+  ComputeHCISchedulerHints:
+    'capabilities:node': 'osd-compute-%index%'
+#  R630ComputeSchedulerHints:
+#    'capabilities:node': 'R630compute-%index%'
+#  R220ComputeSchedulerHints:
+#    'capabilities:node': 'R220compute-%index%'
+
+  HostnameMap:
+    controller-0: controller-0
+
+    osd-compute-0: osd-compute-0
+    osd-compute-1: osd-compute-1
+    osd-compute-2: osd-compute-2
+    osd-compute-3: osd-compute-3
+    osd-compute-4: osd-compute-4
+
+ # Misc Config
+  NtpServer: 'pool.ntp.org'
+  NeutronNetworkType: 'vxlan'
+  NeutronTunnelTypes: 'vxlan'
+
+  ControllerIPs:
+    # Each controller will get an IP from the lists below, first controller, first IP
+    internal_api:
+    - 172.17.1.201
+    tenant:
+    - 172.17.2.201
+    storage:
+    - 172.17.3.201
+    storage_mgmt:
+    - 172.17.4.201
+    cephmetrics:
+    - 172.17.5.201
+    external:
+    - 172.21.0.160
+
+  ComputeHCIIPs:
+    # Each ceph node will get an IP from the lists below, first node, first IP
+    internal_api:
+    - 172.17.1.221
+    - 172.17.1.222
+    - 172.17.1.223
+    - 172.17.1.224
+    - 172.17.1.225
+    tenant:
+    - 172.17.2.221
+    - 172.17.2.222
+    - 172.17.2.223
+    - 172.17.2.224
+    - 172.17.2.225
+    storage:
+    - 172.17.3.221
+    - 172.17.3.222
+    - 172.17.3.223
+    - 172.17.3.224
+    - 172.17.3.225
+    storage_mgmt:
+    - 172.17.4.221
+    - 172.17.4.222
+    - 172.17.4.223
+    - 172.17.4.224
+    - 172.17.4.225
+    cephmetrics:
+    - 172.17.5.221
+    - 172.17.5.222
+    - 172.17.5.223
+    - 172.17.5.224
+    - 172.17.5.225

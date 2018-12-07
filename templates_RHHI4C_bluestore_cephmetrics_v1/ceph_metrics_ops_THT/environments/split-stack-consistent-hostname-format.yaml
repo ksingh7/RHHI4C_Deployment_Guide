@@ -1,0 +1,6 @@
+parameter_defaults:
+  # Consistent Hostname format
+
+  ControllerHostnameFormat: overcloud-controller-%index%
+
+  ComputeHCIHostnameFormat: overcloud-computehci-%index%

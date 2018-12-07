@@ -1,0 +1,5 @@
+parameter_defaults:
+  CephAnsiblePlaybookVerbosity: 1
+  CephClusterFSID: '4b5c8c0a-ff60-454b-a1b4-9747aa737d19'
+  CephClientKey: 'AQDLOh1VgEp6FRAAFzT7Zw+Y9V6JJExQAsRnRQ=='
+  CephExternalMonHost: '192.168.120.254'
